@@ -218,7 +218,7 @@ autotrader. To access the GIT repository, you'll first need to 'clone' it.
 For example:
 
 ```shell
-git clone https://git-codecommit.eu-central-1.amazonaws.com/v1/repos/Leoni
+git clone https://git-codecommit.eu-central-1.amazonaws.com/v1/repos/TEAM_NAME
 ```
 
 (replace 'TEAM_NAME' with your team name.)
