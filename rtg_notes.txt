@@ -1,0 +1,14 @@
+Ready Trader Go —— Notes on the Code
+
+1) Autotrader.py
+Variables: 
+	order_ids  - an itertools.count() object that increments when next(order_ids) is called
+	bids (set) - list of previous bid ids
+	asks (set)
+	ask_id = ask_price = bid_id = bid_price = position = 0 (numbers)
+Functions
+	a) on_error_message - called when error detected - reports to logger and calls all zeros on_order_status_message
+	b) on_hedge_filled_message - called when hedge order is filled - reports to logger
+	c) on_order_book_update_message - called to report order book status, logs OB status and adjusts price to determine if order needs to be cancelled and re-submitted
+	d) on_order_filled_message - called when order partially or fully filled - logs, increases self.position if order was bid, decreases position if order was ask. Sends new hedge order in ask or bid respectively in each case 
+    e) on_order_status_message

@@ -43,10 +43,10 @@ class AutoTrader(BaseAutoTrader):
     def __init__(self, loop: asyncio.AbstractEventLoop, team_name: str, secret: str):
         """Initialise a new instance of the AutoTrader class."""
         super().__init__(loop, team_name, secret)
-        self.order_ids = itertools.count(1)
+        self.order_ids = itertools.count(1) # iterates up every time next(self.order_ids) is called
         self.bids = set()
         self.asks = set()
-        self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
+        self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = self.best_ask = self.best_bid = 0
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -87,21 +87,30 @@ class AutoTrader(BaseAutoTrader):
             if self.bid_id != 0 and new_bid_price not in (self.bid_price, 0):
                 self.send_cancel_order(self.bid_id)
                 self.bid_id = 0
+
             if self.ask_id != 0 and new_ask_price not in (self.ask_price, 0):
                 self.send_cancel_order(self.ask_id)
                 self.ask_id = 0
 
+            # if the new bid and ask price are NOT the current algorithm bid and ask (i.e. which are currently on order),
+            # CANCEL the bid and ask orders that are out currently
+
             if self.bid_id == 0 and new_bid_price != 0 and self.position < POSITION_LIMIT:
+                # place bid order if: bid_id == 0, new_bid_price isnt zero, position is below position limit
                 self.bid_id = next(self.order_ids)
                 self.bid_price = new_bid_price
+                # update bid_price with the new value
                 self.send_insert_order(self.bid_id, Side.BUY, new_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.bids.add(self.bid_id)
 
             if self.ask_id == 0 and new_ask_price != 0 and self.position > -POSITION_LIMIT:
+                # place ask order if: ask_id is zero, new_ask_price not zero, position ABOVE the lower position limit
                 self.ask_id = next(self.order_ids)
                 self.ask_price = new_ask_price
                 self.send_insert_order(self.ask_id, Side.SELL, new_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.asks.add(self.ask_id)
+
+            # places new orders if no current orders (bid/ask_id ==0), and still within position range
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
@@ -153,5 +162,13 @@ class AutoTrader(BaseAutoTrader):
         If there are less than five prices on a side, then zeros will appear at
         the end of both the prices and volumes arrays.
         """
+        if ask_prices[0] != 0:
+            self.best_ask = ask_prices[0]
+        if bid_prices[0] != 0:
+            self.best_bid = bid_prices[0]
+
+        print('ask', self.best_ask)
+        print('bid', self.best_bid)
+
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument,
                          sequence_number)
