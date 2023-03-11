@@ -26,8 +26,11 @@ from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, M
 LOT_SIZE = 10
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
+# how much the price of the stock can vary by (only 1 euro)
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 MAX_ASK_NEAREST_TICK = MAXIMUM_ASK // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+
+# FUTURE ==0, ETF ==1
 
 
 class AutoTrader(BaseAutoTrader):
@@ -77,12 +80,19 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
+        print(instrument, ask_prices, ask_volumes)
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                          sequence_number)
-        if instrument == Instrument.FUTURE:
+        if instrument == 0:
             price_adjustment = - (self.position // LOT_SIZE) * TICK_SIZE_IN_CENTS
-            new_bid_price = bid_prices[0] + price_adjustment if bid_prices[0] != 0 else 0
-            new_ask_price = ask_prices[0] + price_adjustment if ask_prices[0] != 0 else 0
+            mid_price = (bid_prices[0] + ask_prices[0])//2
+            spread = 2 * TICK_SIZE_IN_CENTS
+            print(mid_price)
+            # new_bid_price = bid_prices[0] + price_adjustment if bid_prices[0] != 0 else 0
+            # new_ask_price = ask_prices[0] + price_adjustment if ask_prices[0] != 0 else 0
+
+            new_bid_price = mid_price -2*TICK_SIZE_IN_CENTS + price_adjustment if bid_prices[0] != 0 else 0
+            new_ask_price = mid_price +1*TICK_SIZE_IN_CENTS + price_adjustment if ask_prices[0] != 0 else 0
 
             if self.bid_id != 0 and new_bid_price not in (self.bid_price, 0):
                 self.send_cancel_order(self.bid_id)
@@ -124,9 +134,12 @@ class AutoTrader(BaseAutoTrader):
         if client_order_id in self.bids:
             self.position += volume
             self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
+            # print(MIN_BID_NEAREST_TICK, 'hedge - mbnt')
         elif client_order_id in self.asks:
             self.position -= volume
             self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
+            # print(MAX_ASK_NEAREST_TICK, 'hedge - mant')
+        
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
                                 fees: int) -> None:
@@ -162,13 +175,16 @@ class AutoTrader(BaseAutoTrader):
         If there are less than five prices on a side, then zeros will appear at
         the end of both the prices and volumes arrays.
         """
+
         if ask_prices[0] != 0:
             self.best_ask = ask_prices[0]
         if bid_prices[0] != 0:
             self.best_bid = bid_prices[0]
 
-        print('ask', self.best_ask)
-        print('bid', self.best_bid)
+        # print('ask', self.best_ask)
+        # print('bid', self.best_bid)
+
+        print(instrument, bid_prices, ask_prices)
 
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument,
                          sequence_number)
