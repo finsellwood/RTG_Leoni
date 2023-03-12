@@ -28,12 +28,13 @@ POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
 TICK_INTERVAL = 0.25
 QUEUE_LENGTH = 600
-HEDGE_DELAY = 20
+HEDGE_DELAY = 50
 # how much the price of the stock can vary by (only 1 euro)
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 MAX_ASK_NEAREST_TICK = MAXIMUM_ASK // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
 # FUTURE ==0, ETF ==1
+# ASK = 0, BID = 1 for Side
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -54,8 +55,6 @@ class AutoTrader(BaseAutoTrader):
         self.mid_prices = list([0,0,0,0,0])
         self.time_passed  = itertools.count(1)
         self.current_time = 0
-        self.time_passed_2 = itertools.count(2)
-        self.current_time_2 = 0
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = self.best_ask = self.best_bid = 0
 
         # trend variables
@@ -71,6 +70,9 @@ class AutoTrader(BaseAutoTrader):
         self.price_order_queue = [0] * self.queue_length # stores the price of orders to be execd
 
         self.queue_head = self.queue_tail = 0
+
+        # debug variables
+        self.no_bid_delayed = self.no_ask_delayed = 0
 
     def delay_hedge_order(self, execution_time:int, order_id:int, buy_or_ask:bool, order_price:int, order_vol:int):
         # true == buy, false == ask
@@ -97,28 +99,48 @@ class AutoTrader(BaseAutoTrader):
     def check_empty_hedge_queue(self):
         return self.queue_head == self.queue_tail
     
+    def change_detect_simple(self):
+        if self.short_term_grad > 100:
+            self.hedge_delay = -1
+        elif self.short_term_grad < -100:
+            self.hedge_delay = +1
+        else:
+            self.hedge_delay = 0
+
+    def change_detect_inc_med(self):
+        if self.short_term_grad > 100 and self.short_term_grad > self.med_term_grad:
+            # print('POSITIVE TREND')
+            self.hedge_delay = -1
+            # if trend is positive, want to delay any ASK hedge orders
+        elif self.short_term_grad < -100 and self.short_term_grad < self.med_term_grad:
+            # print('NEGATIVE TREND')
+            self.hedge_delay = +1
+        else:
+            self.hedge_delay = 0
+            # with no trend, execute all hedge orders on time
+
+    
     def trend_spotter(self):
         # try and notice positive or negative trend (currently using futures data)
         self.short_term_grad = (self.mid_prices[-1] - self.mid_prices[-5]) / (5*TICK_INTERVAL)
         if len(self.mid_prices) >= 20:
             self.med_term_grad = (self.mid_prices[-1] - self.mid_prices[-20]) / (20*TICK_INTERVAL)
+            # print(self.short_term_grad, self.med_term_grad)
             # if len(self.mid_prices) >=100:
             #     self.long_term_grad = (self.mid_prices[-1] - self.mid_prices[-100]) / (5*TICK_INTERVAL)
-        
-        if self.short_term_grad > 100 and self.short_term_grad > self.med_term_grad:
-            print('POSITIVE TREND')
-            self.hedge_delay = -1
-            # if trend is positive, want to delay any ASK hedge orders
+        self.change_detect_simple()
 
-        elif self.short_term_grad < -100 and self.short_term_grad < self.med_term_grad:
-            print('NEGATIVE TREND')
-            self.hedge_delay = +1
-            # if trend is negative, want to delay any BUY hedge orders
+    def calc_midpoints(self, bid_prices, ask_prices):
+        if ask_prices[0] != 0:
+            self.best_ask = ask_prices[0]
+        if bid_prices[0] != 0:
+            self.best_bid = bid_prices[0]
 
-        else:
-            print('UNCLEAR TREND')
-            self.hedge_delay = 0
-            # with no trend, execute all hedge orders on time
+        middle = ((self.best_ask + self.best_bid)//2) # NOT A MULTIPLE OF TICK SIZE - used to see trends
+        self.mid_prices.append(middle)
+
+        self.trend_spotter()
+
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -151,11 +173,17 @@ class AutoTrader(BaseAutoTrader):
         """
 
         self.current_time = next(self.time_passed)
-        print(self.current_time, 'time')
+        # print(self.position, 'bid delayed:', self.no_bid_delayed, 'ask delayed:', self.no_ask_delayed)
+        # print(self.current_time, 'time')
+
         # print(instrument, ask_prices, ask_volumes)
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                          sequence_number)
+        
         if instrument == 0:
+
+            # self.calc_midpoints(bid_prices, ask_prices)
+
             price_adjustment = - (self.position // LOT_SIZE) * TICK_SIZE_IN_CENTS
             mid_price = ((bid_prices[0] + ask_prices[0])//2)// TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
             # print(mid_price)
@@ -192,8 +220,20 @@ class AutoTrader(BaseAutoTrader):
                 self.ask_price = new_ask_price
                 self.send_insert_order(self.ask_id, Side.SELL, new_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.asks.add(self.ask_id)
-
             # places new orders if no current orders (bid/ask_id ==0), and still within position range
+
+        # EXECUTE QUEUED HEDGE ORDERS 
+        # want to check for orders that have reached due time, and execute them
+        next_order_exec_time = self.peek_order()
+        if not self.check_empty_hedge_queue() and next_order_exec_time <= self.current_time:
+            order_info = self.pop_order()
+            self.send_hedge_order(next(self.order_ids), order_info[2], order_info[3], order_info[4])
+            print('executed delayed hedge on side ', order_info[2], 'with volume', order_info[4], 'at time ', self.current_time)
+            if order_info[2] == Side.ASK:
+                self.no_ask_delayed -=1
+            elif order_info[2] == Side.BID:
+                self.no_bid_delayed -=1
+            # print(order_info)
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
@@ -208,8 +248,9 @@ class AutoTrader(BaseAutoTrader):
             self.position += volume
             if self.hedge_delay == -1:
                 # delay the hedge
-                self.delay_hedge_order(self.current_time+HEDGE_DELAY, next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
-                print('delayed ASK hedge order')
+                self.delay_hedge_order(self.current_time+HEDGE_DELAY, 0 , Side.ASK, MIN_BID_NEAREST_TICK, volume)
+                print('delayed ASK hedge order with volume', volume, 'at time ', self.current_time)
+                self.no_ask_delayed +=1
             else:
                 self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
             # print(MIN_BID_NEAREST_TICK, 'hedge - mbnt')
@@ -217,8 +258,9 @@ class AutoTrader(BaseAutoTrader):
             self.position -= volume
             if self.hedge_delay == +1:
                 # delay hedge, as it is a bid hedge
-                self.delay_hedge_order(self.current_time+HEDGE_DELAY, next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
-                print('delayed BID hedge order')
+                self.delay_hedge_order(self.current_time+HEDGE_DELAY, 0 , Side.BID, MAX_ASK_NEAREST_TICK, volume)
+                print('delayed BID hedge order with volume', volume, 'at time ', self.current_time)
+                self.no_bid_delayed +=1
             else:
                 self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
             # print(MAX_ASK_NEAREST_TICK, 'hedge - mant')
@@ -259,30 +301,18 @@ class AutoTrader(BaseAutoTrader):
         the end of both the prices and volumes arrays.
         """
 
-        if instrument == 0:
-            if ask_prices[0] != 0:
-                self.best_ask = ask_prices[0]
-            if bid_prices[0] != 0:
-                self.best_bid = bid_prices[0]
+        # if instrument == 0:
+        #     if ask_prices[0] != 0:
+        #         self.best_ask = ask_prices[0]
+        #     if bid_prices[0] != 0:
+        #         self.best_bid = bid_prices[0]
 
-        middle = ((self.best_ask + self.best_bid)//2) # NOT A MULTIPLE OF TICK SIZE - used to see trends
-        self.mid_prices.append(middle)
+        # middle = ((self.best_ask + self.best_bid)//2) # NOT A MULTIPLE OF TICK SIZE - used to see trends
+        # self.mid_prices.append(middle)
 
-        self.trend_spotter()
-        # print('ask', self.best_ask)
-        # print('bid', self.best_bid)
-
-        # print(instrument, bid_prices, ask_prices)
-        # print(self.mid_prices[-5:])
-
-        # EXECUTE QUEUED HEDGE ORDERS 
-        # want to check for orders that have reached due time, and execute them
-        next_order_exec_time = self.peek_order()
-        if not self.check_empty_hedge_queue() and next_order_exec_time <= self.current_time:
-            order_info = self.pop_order()
-            self.send_hedge_order(order_info[1], order_info[2], order_info[3], order_info[4])
-            print('executed delayed hedge on side ', order_info[2])
-            # print(order_info)
-
+        # self.trend_spotter()
+        if instrument ==0:
+            self.calc_midpoints(bid_prices, ask_prices)
+        
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument,
                          sequence_number)
