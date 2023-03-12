@@ -5,7 +5,7 @@
     "MarketOpenDelay": 5.0,
     "MatchEventsFile": "match_events.csv",
     "ScoreBoardFile": "score_board.csv",
-    "Speed": 1.0,
+    "Speed": 10.0,
     "TickInterval": 0.25
   },
   "Execution": {
@@ -38,6 +38,7 @@
   "Traders": {
     "TraderOne": "secret",
     "TraderOne_Hedge": "secret",
-    "TraderOne_Hedge_2": "secret"
+    "TraderOne_Hedge_2": "secret",
+    "Trader_Arb":"secret"
   }
 }
