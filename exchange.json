@@ -37,6 +37,6 @@
   },
   "Traders": {
     "TraderOne": "secret",
-    "TraderTwo": "secret"
+    "TraderOne_Hedge": "secret"
   }
 }

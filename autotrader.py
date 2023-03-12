@@ -32,6 +32,7 @@ MAX_ASK_NEAREST_TICK = MAXIMUM_ASK // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
 # FUTURE ==0, ETF ==1
 
+# note: num // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -80,19 +81,20 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
-        print(instrument, ask_prices, ask_volumes)
+        # print(instrument, ask_prices, ask_volumes)
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                          sequence_number)
         if instrument == 0:
             price_adjustment = - (self.position // LOT_SIZE) * TICK_SIZE_IN_CENTS
-            mid_price = (bid_prices[0] + ask_prices[0])//2
+            mid_price = ((bid_prices[0] + ask_prices[0])//2)// TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+            # print(mid_price)
             spread = 2 * TICK_SIZE_IN_CENTS
-            print(mid_price)
+            # print(mid_price)
             # new_bid_price = bid_prices[0] + price_adjustment if bid_prices[0] != 0 else 0
             # new_ask_price = ask_prices[0] + price_adjustment if ask_prices[0] != 0 else 0
 
-            new_bid_price = mid_price -2*TICK_SIZE_IN_CENTS + price_adjustment if bid_prices[0] != 0 else 0
-            new_ask_price = mid_price +1*TICK_SIZE_IN_CENTS + price_adjustment if ask_prices[0] != 0 else 0
+            new_bid_price = mid_price - spread + price_adjustment if bid_prices[0] != 0 else 0
+            new_ask_price = mid_price + spread + price_adjustment if ask_prices[0] != 0 else 0
 
             if self.bid_id != 0 and new_bid_price not in (self.bid_price, 0):
                 self.send_cancel_order(self.bid_id)
@@ -184,7 +186,7 @@ class AutoTrader(BaseAutoTrader):
         # print('ask', self.best_ask)
         # print('bid', self.best_bid)
 
-        print(instrument, bid_prices, ask_prices)
+        # print(instrument, bid_prices, ask_prices)
 
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument,
                          sequence_number)
