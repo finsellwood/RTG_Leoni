@@ -5,7 +5,7 @@
     "MarketOpenDelay": 5.0,
     "MatchEventsFile": "match_events.csv",
     "ScoreBoardFile": "score_board.csv",
-    "Speed": 10.0,
+    "Speed":1.0,
     "TickInterval": 0.25
   },
   "Execution": {
@@ -39,6 +39,21 @@
     "TraderOne": "secret",
     "TraderOne_Hedge": "secret",
     "TraderOne_Hedge_2": "secret",
+    "TraderOne_Hedge_3": "secret",
+    "TraderOne_Hedge_4": "secret",
+    "TraderOne_Hedge_5": "secret",
+    "TraderOne_Arb": "secret",
+    "Hedge_ewma_1": "secret",
+    "Hedge_ewma_2": "secret",
+    "Hedge_ewma_3": "secret",
+    "Hedge_ewma_4": "secret",
+    "Trader_ArbTest": "secret",
+
+    
+
+
+
+
     "Trader_Arb":"secret"
   }
 }

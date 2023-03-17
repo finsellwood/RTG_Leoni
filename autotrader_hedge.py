@@ -29,6 +29,7 @@ TICK_SIZE_IN_CENTS = 100
 TICK_INTERVAL = 0.25
 QUEUE_LENGTH = 600
 HEDGE_DELAY = 50
+SMALL_AVERAGE_LENGTH = 50
 # how much the price of the stock can vary by (only 1 euro)
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 MAX_ASK_NEAREST_TICK = MAXIMUM_ASK // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
@@ -52,9 +53,11 @@ class AutoTrader(BaseAutoTrader):
         self.order_ids = itertools.count(1) # iterates up every time next(self.order_ids) is called
         self.bids = set()
         self.asks = set()
-        self.mid_prices = list([0,0,0,0,0])
+        self.mid_prices = list([0]*SMALL_AVERAGE_LENGTH)
         self.time_passed  = itertools.count(1)
         self.current_time = 0
+        self.time_passed2  = itertools.count(1)
+        self.current_time2 = 0
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = self.best_ask = self.best_bid = 0
 
         # trend variables
@@ -122,9 +125,9 @@ class AutoTrader(BaseAutoTrader):
     
     def trend_spotter(self):
         # try and notice positive or negative trend (currently using futures data)
-        self.short_term_grad = (self.mid_prices[-1] - self.mid_prices[-5]) / (5*TICK_INTERVAL)
-        if len(self.mid_prices) >= 20:
-            self.med_term_grad = (self.mid_prices[-1] - self.mid_prices[-20]) / (20*TICK_INTERVAL)
+        self.short_term_grad = (self.mid_prices[-1] - self.mid_prices[-SMALL_AVERAGE_LENGTH]) / (SMALL_AVERAGE_LENGTH*TICK_INTERVAL)
+        if len(self.mid_prices) >= 200:
+            self.med_term_grad = (self.mid_prices[-1] - self.mid_prices[-200]) / (200*TICK_INTERVAL)
             # print(self.short_term_grad, self.med_term_grad)
             # if len(self.mid_prices) >=100:
             #     self.long_term_grad = (self.mid_prices[-1] - self.mid_prices[-100]) / (5*TICK_INTERVAL)
@@ -140,6 +143,41 @@ class AutoTrader(BaseAutoTrader):
         self.mid_prices.append(middle)
 
         self.trend_spotter()
+    
+    def data_log_midpoints(self, bid_prices, ask_prices, instrum):
+        if ask_prices[0] != 0 and bid_prices[0] != 0:
+            middle = ((ask_prices[0] + bid_prices[0])//2)
+            time = self.current_time
+            
+                # only record every 10 datapoints (seem to get value every two ticks)
+            # print(instrum)
+            if instrum ==0:
+                with open('future_data.txt', 'a') as g:
+                    g.write('\n'+ str(time)+','+ str(middle))
+                # print('writing to future data')
+            if instrum ==1:
+                with open('etf_data.txt', 'a') as f:
+                    f.write('\n'+ str(time)+ ','+ str(middle))         
+                # print('writing to etf data')
+
+    def data_log_sold_midpoints(self, bid_prices, ask_prices, instrum):
+        if ask_prices[0] != 0 and bid_prices[0] != 0:
+            middle = ((ask_prices[0] + bid_prices[0])//2)
+            time = self.current_time
+            
+                # only record every 10 datapoints (seem to get value every two ticks)
+            # print(instrum ,'sale')
+            if instrum ==0:
+                with open('future_sale_data.txt', 'a') as g:
+                    g.write('\n'+ str(time)+','+ str(middle))
+                # print('writing to future data')
+            if instrum ==1:
+                with open('etf_sale_data.txt', 'a') as f:
+                    f.write('\n'+ str(time)+ ','+ str(middle))         
+                # print('writing to etf data')
+    
+
+
 
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
@@ -175,6 +213,7 @@ class AutoTrader(BaseAutoTrader):
         self.current_time = next(self.time_passed)
         # print(self.position, 'bid delayed:', self.no_bid_delayed, 'ask delayed:', self.no_ask_delayed)
         # print(self.current_time, 'time')
+        self.data_log_midpoints(bid_prices, ask_prices, instrument)
 
         # print(instrument, ask_prices, ask_volumes)
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
@@ -300,7 +339,7 @@ class AutoTrader(BaseAutoTrader):
         If there are less than five prices on a side, then zeros will appear at
         the end of both the prices and volumes arrays.
         """
-
+        
         # if instrument == 0:
         #     if ask_prices[0] != 0:
         #         self.best_ask = ask_prices[0]
@@ -309,10 +348,12 @@ class AutoTrader(BaseAutoTrader):
 
         # middle = ((self.best_ask + self.best_bid)//2) # NOT A MULTIPLE OF TICK SIZE - used to see trends
         # self.mid_prices.append(middle)
+        self.current_time2 = next(self.time_passed2)
+        # print(self.current_time2, self.current_time, 'sale vs orderbook update')
 
         # self.trend_spotter()
         if instrument ==0:
             self.calc_midpoints(bid_prices, ask_prices)
-        
+        self.data_log_sold_midpoints(bid_prices, ask_prices, instrument)
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument,
                          sequence_number)

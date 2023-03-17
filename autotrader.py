@@ -26,13 +26,9 @@ from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, M
 LOT_SIZE = 10
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
-# how much the price of the stock can vary by (only 1 euro)
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 MAX_ASK_NEAREST_TICK = MAXIMUM_ASK // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
-# FUTURE ==0, ETF ==1
-
-# note: num // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -47,10 +43,16 @@ class AutoTrader(BaseAutoTrader):
     def __init__(self, loop: asyncio.AbstractEventLoop, team_name: str, secret: str):
         """Initialise a new instance of the AutoTrader class."""
         super().__init__(loop, team_name, secret)
-        self.order_ids = itertools.count(1) # iterates up every time next(self.order_ids) is called
+        self.order_ids = itertools.count(1)
         self.bids = set()
         self.asks = set()
-        self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = self.best_ask = self.best_bid = 0
+        self.best_ask_trade = 0
+        self.best_bid_trade = 0
+        self.arb_ticker = 0
+        self.nr_bids_btw_bid = self.nr_asks_btw_ask = 0
+        self.vol_sendinorder = 0
+        self.last_bid_fut = self.last_ask_fut = 0
+        self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -81,48 +83,81 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
-        # print(instrument, ask_prices, ask_volumes)
+
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                          sequence_number)
-        if instrument == 0:
+
+        if len(self.bids) > 2:
+            self.send_cancel_order(min(self.bids))
+        if len(self.asks) > 2:
+            self.send_cancel_order(min(self.asks))
+
+        if instrument == Instrument.FUTURE:
+            if bid_prices[0] != 0: self.last_bid_fut = bid_prices[0]
+            if ask_prices[0] != 0: self.last_ask_fut = ask_prices[0]
+
             price_adjustment = - (self.position // LOT_SIZE) * TICK_SIZE_IN_CENTS
-            mid_price = ((bid_prices[0] + ask_prices[0])//2)// TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
-            # print(mid_price)
-            spread = 2 * TICK_SIZE_IN_CENTS
-            # print(mid_price)
-            # new_bid_price = bid_prices[0] + price_adjustment if bid_prices[0] != 0 else 0
-            # new_ask_price = ask_prices[0] + price_adjustment if ask_prices[0] != 0 else 0
+            mid = ((bid_prices[0] + ask_prices[0]) // 2) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+            spread = 6 * TICK_SIZE_IN_CENTS
 
-            new_bid_price = mid_price - spread + price_adjustment if bid_prices[0] != 0 else 0
-            new_ask_price = mid_price + spread + price_adjustment if ask_prices[0] != 0 else 0
+            new_bid_price = mid - spread // 2 + price_adjustment if bid_prices[0] != 0 else 0
+            new_ask_price = mid + spread // 2 + price_adjustment if ask_prices[0] != 0 else 0
 
+            # essentially cancels previous order if new bid or ask are truly new
             if self.bid_id != 0 and new_bid_price not in (self.bid_price, 0):
-                self.send_cancel_order(self.bid_id)
+                self.send_cancel_order(self.bid_id-self.nr_bids_btw_bid)
                 self.bid_id = 0
-
             if self.ask_id != 0 and new_ask_price not in (self.ask_price, 0):
-                self.send_cancel_order(self.ask_id)
+                self.send_cancel_order(self.ask_id-self.nr_asks_btw_ask)
                 self.ask_id = 0
 
-            # if the new bid and ask price are NOT the current algorithm bid and ask (i.e. which are currently on order),
-            # CANCEL the bid and ask orders that are out currently
-
-            if self.bid_id == 0 and new_bid_price != 0 and self.position < POSITION_LIMIT:
-                # place bid order if: bid_id == 0, new_bid_price isnt zero, position is below position limit
+            if self.bid_id == 0 and new_bid_price != 0 and (self.position + 0*self.vol_sendinorder) < 0.8*POSITION_LIMIT:
+                self.arb_ticker = 0
+                self.nr_bids_btw_bid = 0
                 self.bid_id = next(self.order_ids)
                 self.bid_price = new_bid_price
-                # update bid_price with the new value
                 self.send_insert_order(self.bid_id, Side.BUY, new_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.bids.add(self.bid_id)
 
-            if self.ask_id == 0 and new_ask_price != 0 and self.position > -POSITION_LIMIT:
-                # place ask order if: ask_id is zero, new_ask_price not zero, position ABOVE the lower position limit
+            if self.ask_id == 0 and new_ask_price != 0 and (self.position + 0*self.vol_sendinorder) > - 0.8*POSITION_LIMIT:
+                self.arb_ticker = 0
+                self.nr_asks_btw_ask = 0
                 self.ask_id = next(self.order_ids)
                 self.ask_price = new_ask_price
                 self.send_insert_order(self.ask_id, Side.SELL, new_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.asks.add(self.ask_id)
 
-            # places new orders if no current orders (bid/ask_id ==0), and still within position range
+        if instrument == Instrument.ETF:
+            delta_a = delta_b = 0
+            # if bid of etf is higher or equal than fut ask decent change for arbitrage  => sell etf at bid_prices[0]
+            if self.last_ask_fut != 0: delta_a = (bid_prices[0] - self.last_ask_fut)//TICK_SIZE_IN_CENTS  # ranges from -400 to 700 at least
+            # if ask of etf is lower or equal than bid decent change for arbitrage => buy etf at ask_prices[0]
+            if self.last_bid_fut != 0: delta_b = (self.last_bid_fut- ask_prices[0])//TICK_SIZE_IN_CENTS
+
+            # print(delta_a,delta_b)
+            if delta_a > 3 and (self.position + 0*self.vol_sendinorder) > - 0.8*POSITION_LIMIT and self.arb_ticker < 2:
+                self.arb_ticker += 1
+                self.nr_asks_btw_ask = next(self.order_ids) - self.ask_id
+                self.ask_id = self.ask_id + self.nr_asks_btw_ask
+                # self.vol_sendinorder -= LOT_SIZE
+                # print("Arbitrage a: " + str(delta_a) + str(self.arb_ticker))
+                price = (bid_prices[0] - 200) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+                self.send_insert_order(self.ask_id, Side.SELL, price, LOT_SIZE, Lifespan.FILL_AND_KILL)
+                self.asks.add(self.ask_id)
+
+            if delta_b > 3 and (self.position + 0*self.vol_sendinorder) < 0.8*POSITION_LIMIT and self.arb_ticker < 2:
+                self.arb_ticker += 1
+                self.nr_bids_btw_bid = next(self.order_ids) - self.bid_id
+                self.bid_id = self.bid_id + self.nr_bids_btw_bid
+                # self.vol_sendinorder += LOT_SIZE
+                # print("Arbitrage b: " + str(delta_b) + str(self.arb_ticker))
+                price = (ask_prices[0] + 200)//TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+                self.send_insert_order(self.bid_id, Side.BUY, price, LOT_SIZE, Lifespan.FILL_AND_KILL)
+                self.bids.add(self.bid_id)
+                #print(self.bids)
+
+      #  print(self.position, self.vol_sendinorder)
+
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
@@ -136,12 +171,9 @@ class AutoTrader(BaseAutoTrader):
         if client_order_id in self.bids:
             self.position += volume
             self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
-            # print(MIN_BID_NEAREST_TICK, 'hedge - mbnt')
         elif client_order_id in self.asks:
             self.position -= volume
             self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
-            # print(MAX_ASK_NEAREST_TICK, 'hedge - mant')
-        
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
                                 fees: int) -> None:
@@ -177,16 +209,10 @@ class AutoTrader(BaseAutoTrader):
         If there are less than five prices on a side, then zeros will appear at
         the end of both the prices and volumes arrays.
         """
-
         if ask_prices[0] != 0:
-            self.best_ask = ask_prices[0]
+            self.best_ask_trade = ask_prices[0]
         if bid_prices[0] != 0:
-            self.best_bid = bid_prices[0]
-
-        # print('ask', self.best_ask)
-        # print('bid', self.best_bid)
-
-        # print(instrument, bid_prices, ask_prices)
+            self.best_bid_trade = bid_prices[0]
 
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument,
                          sequence_number)
