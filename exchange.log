@@ -16526,3 +16526,21 @@ ConnectionResetError: [Errno 54] Connection reset by peer
 2023-03-16 23:09:49,714 [INFO   ] [MATCH_EVENTS] writer thread complete after processing 468209 match events
 2023-03-16 23:09:49,714 [INFO   ] [SCORE_BOARD] writer thread complete after processing 3602 score records
 2023-03-16 23:09:49,714 [INFO   ] [APP] closing event loop
+2023-03-17 15:18:51,249 [INFO   ] [APP] exchange started with arguments={rtg.py, run, arbitrage_hedge.py}
+2023-03-17 15:18:51,250 [INFO   ] [APP] configuration={"Engine":{"MarketDataFile":"data/market_data5.csv","MarketEventInterval":0.05,"MarketOpenDelay":5.0,"MatchEventsFile":"match_events.csv","ScoreBoardFile":"score_board.csv","Speed":1.0,"TickInterval":0.25},"Execution":{"Host":"127.0.0.1","Port":12345},"Fees":{"Maker":-0.0001,"Taker":0.0002},"Hud":{"Host":"127.0.0.1","Port":12347},"Information":{"Type":"mmap","Name":"info.dat"},"Instrument":{"EtfClamp":0.002,"TickSize":1.0},"Limits":{"ActiveOrderCountLimit":10,"ActiveVolumeLimit":200,"MessageFrequencyInterval":1.0,"MessageFrequencyLimit":50,"PositionLimit":100},"Traders":{"TraderOne":"secret","TraderOne_Hedge":"secret","TraderOne_Hedge_2":"secret","TraderOne_Hedge_3":"secret","TraderOne_Hedge_4":"secret","TraderOne_Hedge_5":"secret","TraderOne_Arb":"secret","Hedge_ewma_1":"secret","Hedge_ewma_2":"secret","Hedge_ewma_3":"secret","Hedge_ewma_4":"secret","Trader_ArbTest":"secret","Trader_Arb":"secret"}}
+2023-03-17 15:18:51,250 [INFO   ] [CONTROLLER] starting the match
+2023-03-17 15:18:51,250 [INFO   ] [EXECUTION] starting execution server: host=127.0.0.1 port=12345
+2023-03-17 15:18:51,250 [INFO   ] [INFORMATION] starting information publisher: type=mmap name=info.dat
+2023-03-17 15:18:51,255 [INFO   ] [HEADS_UP] starting heads-up display server: host=127.0.0.1 port=12347
+2023-03-17 15:18:51,255 [INFO   ] [INFORMATION] information channel established
+2023-03-17 15:18:51,548 [INFO   ] [CONNECTION] fd=24 connection established: peer=127.0.0.1:56522
+2023-03-17 15:18:51,548 [INFO   ] [EXECUTION] fd=24 'Trader_ArbTest' is ready!
+2023-03-17 15:18:53,123 [INFO   ] [CONNECTION] fd=25 connection established: peer=127.0.0.1:56523
+2023-03-17 15:18:56,259 [INFO   ] [CONTROLLER] market open
+2023-03-17 15:42:50,012 [INFO   ] [MARKET_EVENTS] reader thread complete after processing 318316 market events
+2023-03-17 15:42:53,134 [INFO   ] [TIMER] shutting down the match: time=900.226234 reason='match complete'
+2023-03-17 15:42:53,135 [INFO   ] [COMPETITOR] 'Trader_ArbTest' closing execution channel at time=900.226234
+2023-03-17 15:42:53,136 [INFO   ] [CONNECTION] fd=24 connection lost
+2023-03-17 15:42:53,136 [INFO   ] [SCORE_BOARD] writer thread complete after processing 3602 score records
+2023-03-17 15:42:53,136 [INFO   ] [MATCH_EVENTS] writer thread complete after processing 323335 match events
+2023-03-17 15:42:53,137 [INFO   ] [APP] closing event loop
